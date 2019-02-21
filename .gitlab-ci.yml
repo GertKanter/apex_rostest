@@ -30,6 +30,71 @@ build_all:
       - build
       - install
 
+# Build everything from source to make sure our package.xml deps are correct
+build_isolated:
+  stage: build
+  image:
+    name: osrf/ros2:nightly
+    entrypoint: [""]
+  only:
+    - schedules
+  before_script:
+    - apt-get update && apt-get install -y 
+      build-essential 
+      cmake 
+      git 
+      python3-colcon-common-extensions 
+      python3-pip 
+      python-rosdep 
+      python3-vcstool 
+      wget
+    - python3 -m pip install -U 
+      argcomplete 
+      flake8 
+      flake8-blind-except 
+      flake8-builtins 
+      flake8-class-newline 
+      flake8-comprehensions 
+      flake8-deprecated 
+      flake8-docstrings 
+      flake8-import-order 
+      flake8-quotes 
+      git+https://github.com/lark-parser/lark.git@0.7d 
+      pytest-repeat 
+      pytest-rerunfailures 
+      pytest 
+      pytest-cov 
+      pytest-runner 
+      setuptools
+    - apt-get install --no-install-recommends -y 
+      libasio-dev 
+      libtinyxml2-dev
+  script:
+    - env
+    - mkdir upstream_src
+    - wget https://raw.githubusercontent.com/ros2/ros2/master/ros2.repos
+    - vcs import upstream_src < ros2.repos
+    - rosdep update
+    - rosdep install
+      --from-paths upstream_src
+      --ignore-src
+      --rosdistro crystal
+      -y
+      --skip-keys "console_bridge fastcdr fastrtps libopensplice67 libopensplice69 rti-connext-dds-5.3.1 urdfdom_headers"
+    # Make sure we can build and test apex_launchtest
+    - colcon list --topological-graph --packages-up-to apex_launchtest
+    # - colcon list --topological-graph --packages-up-to apex_launchtest | grep "rclpy" &> /dev/null && exit 1  # Fail if apex_launchtest depends on rclpy
+    - colcon build --packages-up-to apex_launchtest
+    - tar -cf launchtest_artifacts.tar build install
+    # Make sure we can also build and test apex_launchtest_ros
+    - colcon list --topological-graph --packages-up-to apex_launchtest_ros
+    - colcon build --packages-up-to apex_launchtest_ros
+    - tar -cf launchtest_ros_artifacts.tar build install
+  artifacts:
+    paths:
+      - launchtest_artifacts.tar
+      - launchtest_ros_artifacts.tar
+
 test_launchtest:
   stage: test
   image: osrf/ros2:nightly
@@ -60,6 +125,53 @@ test_all:
       - install
       - log
       - "*/.coverage"
+
+test_isolated:
+  stage: test
+  image: osrf/ros2:nightly
+  only:
+    - schedules
+  dependencies:
+    - build_isolated
+  before_script:
+    - apt-get update && apt-get install -y 
+      build-essential 
+      cmake 
+      git 
+      python3-colcon-common-extensions 
+      python3-pip 
+      python-rosdep 
+      python3-vcstool 
+      wget
+    - python3 -m pip install -U 
+      argcomplete 
+      flake8 
+      flake8-blind-except 
+      flake8-builtins 
+      flake8-class-newline 
+      flake8-comprehensions 
+      flake8-deprecated 
+      flake8-docstrings 
+      flake8-import-order 
+      flake8-quotes 
+      git+https://github.com/lark-parser/lark.git@0.7d 
+      pytest-repeat 
+      pytest-rerunfailures 
+      pytest 
+      pytest-cov 
+      pytest-runner 
+      setuptools
+    - apt-get install --no-install-recommends -y 
+      libasio-dev 
+      libtinyxml2-dev
+  script:
+    - pip3 install mock
+    - tar xf launchtest_artifacts.tar -C .
+    - colcon test --packages-select apex_launchtest --pytest-args "-k not (test_flake8 or test_pep257)"
+    - colcon test-result --all --verbose
+    - tar xf launchtest_ros_artifacts.tar -C .
+    - colcon test --packages-select apex_launchtest_ros --pytest-args "-k not (test_flake8 or test_pep257)"
+    - colcon test-result --all --verbose
 
 coverage:
   stage: report
